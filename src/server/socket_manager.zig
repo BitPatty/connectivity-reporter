@@ -72,7 +72,7 @@ pub fn waitForMessage(self: *Self, out_message: *IncomingMessage, cancellation_t
             continue;
         }
 
-        const poll_result = try posix.poll(pollfd_list.items, 5 * time.ms_per_s);
+        const poll_result = try posix.poll(pollfd_list.items, time.ms_per_s);
         if (poll_result == 0) {
             log.debug("No messages received", .{ });
             continue;

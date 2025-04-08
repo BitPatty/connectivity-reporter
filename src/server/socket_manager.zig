@@ -1,11 +1,13 @@
 const std = @import("std");
 
+const ArrayList = std.ArrayList;
 const log = std.log;
 const math = std.math;
 const mem = std.mem;
 const net = std.net;
 const posix = std.posix;
-const ArrayList = std.ArrayList;
+const thread = std.Thread;
+const time = std.time;
 
 const Socket = @import("./socket.zig");
 const SocketProtocol = @import("../enums.zig").SocketProtocol;
@@ -64,9 +66,13 @@ pub fn waitForMessage(self: *Self, out_message: *IncomingMessage, cancellation_t
         self.restartDeadSockets();
 
         try self.getPollFileDescriptorsForBoundSockets(&pollfd_list);
-        if (pollfd_list.items.len == 0) return null;
+        if (pollfd_list.items.len == 0) {
+            // No sockets up -> wait a second before retrying
+            thread.sleep(time.ns_per_s);
+            continue;
+        }
 
-        const poll_result = try posix.poll(pollfd_list.items, 5_000);
+        const poll_result = try posix.poll(pollfd_list.items, 5 * time.ms_per_s);
         if (poll_result == 0) {
             log.debug("No messages received", .{ });
             continue;

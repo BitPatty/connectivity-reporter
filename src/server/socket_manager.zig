@@ -18,7 +18,7 @@ var last_message = Socket.IncomingMessage{
 };
 
 allocator: mem.Allocator,
-sockets: ArrayList(Socket),
+sockets: ArrayList(*Socket),
 
 /// The max length for the message buffer
 const MAX_MESSAGE_BUFFER_LENGTH: u32 = math.maxInt(u32);
@@ -33,7 +33,7 @@ pub const IncomingMessage = struct {
 pub fn init(allocator: mem.Allocator) Self {
     return .{
         .allocator = allocator,
-        .sockets = ArrayList(Socket).init(allocator)
+        .sockets = ArrayList(*Socket).init(allocator)
     };
 }
 
@@ -44,10 +44,13 @@ pub fn listen(self: *Self, address: []const u8, port: u16, protocol: SocketProto
         16 => try initSocketForIPv6Address(address, port, protocol),
         else => return error.InvalidAddress
     };
-
     errdefer socket.close();
-    try socket.listen();
-    try self.sockets.append(socket);
+
+    var allocated_socket = try self.allocator.create(Socket);
+    allocated_socket.* = socket;
+
+    try self.sockets.append(allocated_socket);
+    try allocated_socket.listen();
 }
 
 
@@ -57,12 +60,17 @@ pub fn waitForMessage(self: *Self, out_message: *IncomingMessage, cancellation_t
     var pollfd_list = ArrayList(posix.pollfd).init(self.allocator);
     defer pollfd_list.deinit();
 
-    try self.getPollFileDescriptorsForBoundSockets(&pollfd_list);
-    if (pollfd_list.items.len == 0) return null;
-
     while (!cancellation_token.*) {
+        self.restartDeadSockets();
+
+        try self.getPollFileDescriptorsForBoundSockets(&pollfd_list);
+        if (pollfd_list.items.len == 0) return null;
+
         const poll_result = try posix.poll(pollfd_list.items, 5_000);
-        if (poll_result == 0) continue;
+        if (poll_result == 0) {
+            log.debug("No messages received", .{ });
+            continue;
+        }
 
         for (pollfd_list.items) | pollfd | {
             if (pollfd.revents == 0) continue;
@@ -75,12 +83,27 @@ pub fn waitForMessage(self: *Self, out_message: *IncomingMessage, cancellation_t
 
 /// Frees the resources used by the socket manager including all sockets it holds
 pub fn deinit(self: *Self) void {
-    for (0..self.sockets.items.len) | index | self.sockets.items[index].close();
+    for (0..self.sockets.items.len) | index | {
+        self.sockets.items[index].close();
+        self.allocator.destroy(self.sockets.items[index]);
+    }
     self.sockets.deinit();
 }
 
+/// Restarts all sockets that are not bound
+fn restartDeadSockets(self: *Self) void {
+    for (0..self.sockets.items.len) | index | {
+        if (self.sockets.items[index].posix_socket != null) continue;
+
+        log.debug("Attempting to start socket {} {}", .{ self.sockets.items[index].protocol, self.sockets.items[index].listen_address });
+        self.sockets.items[index].listen() catch | err | {
+            log.warn("Failed to start socket: {} {} {}", .{ self.sockets.items[index].protocol, self.sockets.items[index].listen_address, err });
+        };
+    }
+}
+
 /// Gets the socket for the specified file descriptor
-fn getSocketByFileDescriptor(self: *Self, pollfd: posix.pollfd) !Socket {
+fn getSocketByFileDescriptor(self: *Self, pollfd: posix.pollfd) !*Socket {
     for (self.sockets.items) | socket | {
         if (socket.posix_socket == null) continue;
         if (socket.posix_socket.? == pollfd.fd) return socket;
@@ -93,7 +116,6 @@ fn getSocketByFileDescriptor(self: *Self, pollfd: posix.pollfd) !Socket {
 /// Returns NULL if there is no message or the socket is not listening.
 fn receiveNextMessageOnSocket(self: *Self, pollfd: posix.pollfd, out_message: *IncomingMessage)  !?usize {
     var target_socket = try self.getSocketByFileDescriptor(pollfd);
-
     if (out_message.buffer.len > MAX_MESSAGE_BUFFER_LENGTH) return error.MessageBufferTooLarge;
 
     @memset(out_message.buffer, 0);

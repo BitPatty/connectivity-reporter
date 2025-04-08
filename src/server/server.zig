@@ -41,6 +41,8 @@ pub fn startServer(allocator: mem.Allocator, socket_configurations: []config.Soc
         } else |err| {
             log.debug("Failed to process message {}", .{ err });
         }
+
+        std.Thread.sleep(std.time.ns_per_s);
     }
 }
 

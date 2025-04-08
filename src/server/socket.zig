@@ -42,6 +42,8 @@ pub fn initIPv4(address: [4]u8, port: u16, protocol: SocketProtocol) Self {
 /// `close` needs to be called after processing has been completed to free the binding.
 /// Binding will fail if the address is invalid or no interface is bound to the address.
 pub fn listen(self: *Self) !void {
+    if(self.posix_socket != null) return error.AlreadyListening;
+
     switch (self.protocol) {
         SocketProtocol.UDP => try self.listenUDP(),
         SocketProtocol.TCP => try self.listenTCP()

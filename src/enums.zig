@@ -1,5 +1,6 @@
 pub const SocketProtocol = enum {
-    UDP
+    UDP,
+    TCP
 };
 
 pub const AddressFamily = enum {

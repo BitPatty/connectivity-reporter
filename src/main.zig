@@ -5,7 +5,6 @@ const heap = std.heap;
 const mem = std.mem;
 const os = std.os;
 const posix = std.posix;
-const thread = std.Thread;
 
 const config = @import("./config.zig");
 const server = @import("./server/server.zig");

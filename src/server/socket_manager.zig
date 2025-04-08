@@ -8,6 +8,7 @@ const posix = std.posix;
 const ArrayList = std.ArrayList;
 
 const Socket = @import("./socket.zig");
+const SocketProtocol = @import("../enums.zig").SocketProtocol;
 
 const Self = @This();
 
@@ -36,13 +37,11 @@ pub fn init(allocator: mem.Allocator) Self {
     };
 }
 
-pub const ListenError = posix.SocketError || posix.BindError || posix.GetSockNameError || mem.Allocator.Error || error{InvalidAddress};
-
 /// Binds a new socket on the specified address / port.
-pub fn listen(self: *Self, address: []const u8, port: u16) ListenError!void {
+pub fn listen(self: *Self, address: []const u8, port: u16, protocol: SocketProtocol) !void {
     var socket = switch (address.len) {
-        4 => try initSocketForIPv4Address(address, port),
-        16 => try initSocketForIPv6Address(address, port),
+        4 => try initSocketForIPv4Address(address, port, protocol),
+        16 => try initSocketForIPv6Address(address, port, protocol),
         else => return error.InvalidAddress
     };
 
@@ -51,9 +50,10 @@ pub fn listen(self: *Self, address: []const u8, port: u16) ListenError!void {
     try self.sockets.append(socket);
 }
 
+
 /// Waits for a new message to be received and loads it into `out_message`.
 /// Cancels the process if the cancellation token is set.
-pub fn waitForMessage(self: *Self, out_message: *IncomingMessage, cancellation_token: *const bool) (posix.RecvFromError || mem.Allocator.Error || posix.PollError || error{MessageBufferTooLarge})!?usize {
+pub fn waitForMessage(self: *Self, out_message: *IncomingMessage, cancellation_token: *const bool) !?usize {
     var pollfd_list = ArrayList(posix.pollfd).init(self.allocator);
     defer pollfd_list.deinit();
 
@@ -66,7 +66,7 @@ pub fn waitForMessage(self: *Self, out_message: *IncomingMessage, cancellation_t
 
         for (pollfd_list.items) | pollfd | {
             if (pollfd.revents == 0) continue;
-            return try receiveNextMessage(pollfd, out_message);
+            return try self.receiveNextMessageOnSocket(pollfd, out_message);
         }
     }
 
@@ -79,17 +79,38 @@ pub fn deinit(self: *Self) void {
     self.sockets.deinit();
 }
 
+/// Gets the socket for the specified file descriptor
+fn getSocketByFileDescriptor(self: *Self, pollfd: posix.pollfd) !Socket {
+    for (self.sockets.items) | socket | {
+        if (socket.posix_socket == null) continue;
+        if (socket.posix_socket.? == pollfd.fd) return socket;
+    }
+
+    return error.SocketNotFound;
+}
+
 /// Receives the next message.
 /// Returns NULL if there is no message or the socket is not listening.
-fn receiveNextMessage(pollfd: posix.pollfd, out_message: *IncomingMessage)  (posix.RecvFromError || posix.PollError || error{MessageBufferTooLarge})!?usize {
+fn receiveNextMessageOnSocket(self: *Self, pollfd: posix.pollfd, out_message: *IncomingMessage)  !?usize {
+    var target_socket = try self.getSocketByFileDescriptor(pollfd);
+
     if (out_message.buffer.len > MAX_MESSAGE_BUFFER_LENGTH) return error.MessageBufferTooLarge;
 
     @memset(out_message.buffer, 0);
     @memset(&out_message.source_address.any.data, 0);
 
+    // TCP messages
+    if (target_socket.server != null) {
+        const connection = try target_socket.accept();
+        defer connection.stream.close();
+        const msg = try connection.stream.readAll(out_message.buffer);
+        out_message.source_address.* = connection.address;
+        return msg;
+    }
+
+    // UDP messages
     var address_length: u32 = out_message.source_address.any.data.len;
     const bytes_read = try posix.recvfrom(pollfd.fd, out_message.buffer, 0, &out_message.source_address.any, &address_length);
-
     return bytes_read;
 }
 
@@ -112,17 +133,17 @@ fn getPosixSocketPollFileDescriptor(socket: posix.socket_t) posix.pollfd {
 }
 
 /// Initializes a socket on an IPv4 address
-fn initSocketForIPv4Address(address: []const u8, port: u16) error { InvalidAddress }!Socket {
+fn initSocketForIPv4Address(address: []const u8, port: u16, protocol: SocketProtocol) error { InvalidAddress }!Socket {
     if (address.len != 4) return error.InvalidAddress;
-    var fs_address: [4]u8 = undefined;
-    @memcpy(&fs_address, address);
-    return Socket.initIPv4(fs_address, port);
+    var fd_address: [4]u8 = undefined;
+    @memcpy(&fd_address, address);
+    return Socket.initIPv4(fd_address, port, protocol);
 }
 
 /// Initializes a socket on an IPv6 address
-fn initSocketForIPv6Address(address: []const u8, port: u16) error { InvalidAddress }!Socket {
+fn initSocketForIPv6Address(address: []const u8, port: u16, protocol: SocketProtocol) error { InvalidAddress }!Socket {
     if (address.len != 16) return error.InvalidAddress;
-    var fs_address: [16]u8 = undefined;
-    @memcpy(&fs_address, address);
-    return Socket.initIPv6(fs_address, port);
+    var fd_address: [16]u8 = undefined;
+    @memcpy(&fd_address, address);
+    return Socket.initIPv6(fd_address, port, protocol);
 }

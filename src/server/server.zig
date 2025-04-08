@@ -1,8 +1,9 @@
 const std = @import("std");
 
+const log = std.log;
 const mem = std.mem;
 const net = std.net;
-const log = std.log;
+const time = std.time;
 const thread = std.Thread;
 
 const config = @import("../config.zig");
@@ -14,7 +15,7 @@ const SocketManager = @import("./socket_manager.zig");
 pub fn startServer(allocator: mem.Allocator, socket_configurations: []config.SocketConfiguration, cancellation_token: *const bool) void {
     if(socket_configurations.len == 0) {
         log.warn("No configurations configured, server idling", .{});
-        while (!cancellation_token.*) thread.sleep(1_000);
+        while (!cancellation_token.*) thread.sleep(time.ns_per_s);
     }
 
     var manager = SocketManager.init(allocator);
@@ -29,7 +30,7 @@ pub fn startServer(allocator: mem.Allocator, socket_configurations: []config.Soc
 
     for (socket_configurations) | socket_configuration | {
         log.debug("Found config: {d}:{d}", .{ socket_configuration.bind_address, socket_configuration.bind_port });
-        manager.listen(socket_configuration.bind_address, socket_configuration.bind_port) catch | err | {
+        manager.listen(socket_configuration.bind_address, socket_configuration.bind_port, socket_configuration.protocol) catch | err | {
             log.debug("Failed to add address: {}", .{ err });
         };
     }

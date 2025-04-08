@@ -181,9 +181,8 @@ fn parseSocketProtocolValueJsonToken(value_token: json.Token) !SocketProtocol {
 
 /// Converts a protocol string to the respective socket protocol
 fn parseSocketProtocolFromString(value: []const u8) !SocketProtocol {
-    if (mem.eql(u8, value, "UDP")) {
-        return SocketProtocol.UDP;
-    }
+    if (mem.eql(u8, value, "UDP")) return SocketProtocol.UDP;
+    if (mem.eql(u8, value, "TCP")) return SocketProtocol.TCP;
 
     log.err("Expected protocol, got '{s}'", .{ value });
     return error.UnexpectedToken;

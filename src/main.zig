@@ -11,6 +11,10 @@ const server = @import("./server/server.zig");
 
 var CANCELLATION_TOKEN = false;
 
+pub const std_options = std.Options{
+    .log_level = log.Level.info,
+};
+
 pub fn main() !void {
     mapInterruptHandler();
 

@@ -11,10 +11,6 @@ const server = @import("./server/server.zig");
 
 var CANCELLATION_TOKEN = false;
 
-pub const std_options = std.Options{
-    .log_level = log.Level.info,
-};
-
 pub fn main() !void {
     mapInterruptHandler();
 
@@ -29,6 +25,7 @@ pub fn main() !void {
     }
 
     runServer(gpa.allocator(), cli_args.config_path);
+    log.info("Exiting", .{ });
 }
 
 // -------------------------------------------------------------------------------------
@@ -77,7 +74,7 @@ fn runServer(allocator: mem.Allocator, config_path: []const u8) void {
 // -------------------------------------------------------------------------------------
 
 fn sigaction_setCancellationToken(signal: i32) callconv(.C) void {
-    log.debug("Received exit signal {}", .{ signal });
+    log.info("Received exit signal {}", .{ signal });
     CANCELLATION_TOKEN = true;
 }
 
